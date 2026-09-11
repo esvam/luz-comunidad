@@ -25,14 +25,14 @@ def cargar_datos_disco():
         "cargos_fijos_globales": {"CF": 2.26, "MANT": 1.74, "AP": 60.48, "ER": 12.36, "Afianza": 0},
         "medidores": {
             "SOM": {"tipo": 1, "anterior": 0.0, "actual": 0.0, "lectura_guardada": False, "mant_com": 0.0},
-            "CIRILO": {"tipo": 0, "anterior": 678.21, "actual": 678.21, "lectura_guardada": True, "mant_com": 0.0},
-            "AGUA": {"tipo": 0, "anterior": 27420.7, "actual": 27420.7, "lectura_guardada": True, "mant_com": 0.0},
+            "CIRILO": {"tipo": 0, "anterior": 678.21, "actual": 678.21, "lectura_guardada": False, "mant_com": 0.0},
+            "AGUA": {"tipo": 0, "anterior": 27420.7, "actual": 27420.7, "lectura_guardada": False, "mant_com": 0.0},
             "MARCO": {"tipo": 2, "anterior": 20468.5, "actual": 0.0, "lectura_guardada": False, "mant_com": 0.0},
-            "CLAUDIA": {"tipo": 0, "anterior": 21515.0, "actual": 21515.0, "lectura_guardada": True, "mant_com": 0.0},
+            "CLAUDIA": {"tipo": 0, "anterior": 21515.0, "actual": 21515.0, "lectura_guardada": False, "mant_com": 0.0},
             "CHATO": {"tipo": 2, "anterior": 31023.5, "actual": 0.0, "lectura_guardada": False, "mant_com": 0.0},
             "LILIANA": {"tipo": 2, "anterior": 9129.8, "actual": 0.0, "lectura_guardada": False, "mant_com": 0.0},
             "HELGA": {"tipo": 1, "anterior": 1404.4, "actual": 0.0, "lectura_guardada": False, "mant_com": 100.0},
-            "BRAN": {"tipo": 0, "anterior": 6810.7, "actual": 6810.7, "lectura_guardada": True, "mant_com": 0.0},
+            "BRAN": {"tipo": 0, "anterior": 6810.7, "actual": 6810.7, "lectura_guardada": False, "mant_com": 0.0},
             "SIU": {"tipo": 1, "anterior": 0.0, "actual": 0.0, "lectura_guardada": False, "mant_com": 0.0},
             "EZE": {"tipo": 1, "anterior": 3414.6, "actual": 0.0, "lectura_guardada": False, "mant_com": 0.0},
             "QUINTA": {"tipo": 1, "anterior": 1916.79, "actual": 0.0, "lectura_guardada": False, "mant_com": 0.0},
@@ -165,13 +165,12 @@ if modo == "🏠 Portal del Vecino (Ingresar Lectura)":
                 btn_guardar_lectura = st.form_submit_button("💾 Guardar mi Medición")
                 
                 if btn_guardar_lectura:
-                    # VALIDACIÓN DE SEGURIDAD ANTIBUG
-                    if nueva_lectura == lectura_anterior:
-                        st.error("❌ Error de seguridad: La lectura actual no puede ser igual a la lectura anterior. Ingrese un valor real de consumo.")
+                    if nueva_lectura == lectura_anterior or nueva_lectura < lectura_anterior:
+                        # Bloquear explícitamente la bandera si intenta trampear
                         datos_actuales["medidores"][vecino_seleccionado]["lectura_guardada"] = False
-                    elif nueva_lectura < lectura_anterior:
-                        st.error("❌ Error: La lectura actual no puede ser menor que la lectura anterior.")
-                        datos_actuales["medidores"][vecino_seleccionado]["lectura_guardada"] = False
+                        guardar_datos_disco(datos_actuales)
+                        st.error("❌ Error de seguridad: La lectura actual debe ser estricta y mayor que la lectura anterior.")
+                        st.stop()
                     else:
                         registrar_estado()
                         datos_actuales["medidores"][vecino_seleccionado]["actual"] = float(nueva_lectura)
@@ -179,8 +178,9 @@ if modo == "🏠 Portal del Vecino (Ingresar Lectura)":
                         guardar_datos_disco(datos_actuales)
                         st.success("¡Lectura registrada correctamente! Ya puede descargar su recibo abajo.")
             
-            # Solo permitir descargar si pasó la validación estricta y es distinta a la anterior
-            if info_actual.get("lectura_guardada", False) and float(info_actual["actual"]) != lectura_anterior:
+            # BLOQUEO BLINDADO: Solo mostrar opciones de descarga si la lectura actual guardada es estrictamente mayor que la anterior
+            lectura_actual_guardada = float(info_actual["actual"])
+            if info_actual.get("lectura_guardada", False) and lectura_actual_guardada > lectura_anterior:
                 st.success("✅ Medición válida registrada para este periodo. Su recibo está listo para descarga privada.")
                 
                 resultados_calculados = calcular_resultados_comunidad(datos_actuales)
@@ -248,7 +248,7 @@ if modo == "🏠 Portal del Vecino (Ingresar Lectura)":
                             mime="text/csv"
                         )
             else:
-                st.warning("⚠️ Debe ingresar una lectura actual diferente a la anterior y guardarla para habilitar la descarga de su recibo.")
+                st.warning("⚠️ Debe ingresar una lectura actual mayor a la anterior y guardarla para habilitar la descarga de su recibo.")
 
 # ==========================================
 # MODO 2: PANEL DE ADMINISTRACIÓN
@@ -357,7 +357,7 @@ else:
                         registrar_estado()
                         datos_actuales["medidores"][nuevo_nombre] = {
                             "tipo": int(nuevo_tipo), "anterior": float(nuevo_anterior),
-                            "actual": float(nuevo_actual), "lectura_guardada": True, "mant_com": float(nuevo_mant_com)
+                            "actual": float(nuevo_actual), "lectura_guardada": False, "mant_com": float(nuevo_mant_com)
                         }
                         guardar_datos_disco(datos_actuales)
                         st.success("¡Usuario registrado!")
