@@ -21,7 +21,7 @@ def cargar_datos_disco():
     return {
         "periodo": "SEPTIEMBRE 2026",
         "precio_unitario": 0.618,
-        "periodo_habilitado": False,  # Interruptor para habilitar a los vecinos
+        "periodo_habilitado": False,
         "cargos_fijos_globales": {"CF": 2.26, "MANT": 1.74, "AP": 60.48, "ER": 12.36, "Afianza": 0},
         "medidores": {
             "SOM": {"tipo": 1, "anterior": 0.0, "actual": 0.0, "lectura_guardada": False, "mant_com": 0.0},
@@ -148,9 +148,8 @@ if modo == "🏠 Portal del Vecino (Ingresar Lectura)":
     st.title("💡 Portal de Registro de Consumo - Vecinos")
     st.markdown(f"**Periodo Actual:** `{datos_actuales.get('periodo', 'MES ACTUAL')}`")
     
-    # Verificar si el administrador ha habilitado el periodo
     if not datos_actuales.get("periodo_habilitado", False):
-        st.warning("⏳ El periodo actual **aún no ha sido habilitado** por la administración. Por favor espere a que se carguen los cargos fijos del mes para poder ingresar su lectura.")
+        st.warning("⏳ El periodo actual **aún no ha sido habilitado** por la administración. Por favor espere a que se habiliten los registros.")
     else:
         st.success("🟢 El periodo de registro de lecturas se encuentra **Habilitado**.")
         lista_usuarios = [k for k, v in datos_actuales["medidores"].items() if v["tipo"] > 0 or k == "AGUA"]
@@ -158,21 +157,31 @@ if modo == "🏠 Portal del Vecino (Ingresar Lectura)":
         
         if vecino_seleccionado:
             info_actual = datos_actuales["medidores"][vecino_seleccionado]
-            st.info(f"Lectura Anterior registrada: **{info_actual['anterior']}** kW")
+            lectura_anterior = float(info_actual['anterior'])
+            st.info(f"Lectura Anterior registrada: **{lectura_anterior}** kW")
             
             with st.form("form_lectura_vecino"):
                 nueva_lectura = st.number_input("🔢 Ingrese su Lectura Actual (kWh):", value=float(info_actual["actual"]), format="%.2f")
                 btn_guardar_lectura = st.form_submit_button("💾 Guardar mi Medición")
                 
                 if btn_guardar_lectura:
-                    registrar_estado()
-                    datos_actuales["medidores"][vecino_seleccionado]["actual"] = float(nueva_lectura)
-                    datos_actuales["medidores"][vecino_seleccionado]["lectura_guardada"] = True
-                    guardar_datos_disco(datos_actuales)
-                    st.success("¡Lectura registrada correctamente! Ya puede descargar su recibo abajo.")
+                    # VALIDACIÓN DE SEGURIDAD ANTIBUG
+                    if nueva_lectura == lectura_anterior:
+                        st.error("❌ Error de seguridad: La lectura actual no puede ser igual a la lectura anterior. Ingrese un valor real de consumo.")
+                        datos_actuales["medidores"][vecino_seleccionado]["lectura_guardada"] = False
+                    elif nueva_lectura < lectura_anterior:
+                        st.error("❌ Error: La lectura actual no puede ser menor que la lectura anterior.")
+                        datos_actuales["medidores"][vecino_seleccionado]["lectura_guardada"] = False
+                    else:
+                        registrar_estado()
+                        datos_actuales["medidores"][vecino_seleccionado]["actual"] = float(nueva_lectura)
+                        datos_actuales["medidores"][vecino_seleccionado]["lectura_guardada"] = True
+                        guardar_datos_disco(datos_actuales)
+                        st.success("¡Lectura registrada correctamente! Ya puede descargar su recibo abajo.")
             
-            if info_actual.get("lectura_guardada", False):
-                st.success("✅ Medición registrada para este periodo. Su recibo está listo para descarga privada.")
+            # Solo permitir descargar si pasó la validación estricta y es distinta a la anterior
+            if info_actual.get("lectura_guardada", False) and float(info_actual["actual"]) != lectura_anterior:
+                st.success("✅ Medición válida registrada para este periodo. Su recibo está listo para descarga privada.")
                 
                 resultados_calculados = calcular_resultados_comunidad(datos_actuales)
                 datos_vecino = next((item for item in resultados_calculados if item["Medidor"] == vecino_seleccionado), None)
@@ -239,7 +248,7 @@ if modo == "🏠 Portal del Vecino (Ingresar Lectura)":
                             mime="text/csv"
                         )
             else:
-                st.warning("⚠️ Debe ingresar y guardar su lectura actual del mes para poder descargar su recibo.")
+                st.warning("⚠️ Debe ingresar una lectura actual diferente a la anterior y guardarla para habilitar la descarga de su recibo.")
 
 # ==========================================
 # MODO 2: PANEL DE ADMINISTRACIÓN
@@ -289,7 +298,7 @@ else:
                 for nombre, vals in st.session_state.datos_app["medidores"].items():
                     vals["anterior"] = vals["actual"]
                     vals["lectura_guardada"] = False
-                st.session_state.datos_app["periodo_habilitado"] = False # Bloquear acceso a vecinos hasta nuevo aviso
+                st.session_state.datos_app["periodo_habilitado"] = False
                 guardar_datos_disco(st.session_state.datos_app)
                 st.success("¡Nuevo ciclo iniciado! Periodo bloqueado para vecinos hasta que cargues nuevos cargos fijos y habilites el acceso.")
                 st.rerun()
@@ -317,7 +326,6 @@ else:
 
         st.markdown("---")
         
-        # INTERRUPTOR DE HABILITACIÓN PARA LOS VECINOS
         estado_actual_habilitacion = datos_actuales.get("periodo_habilitado", False)
         nuevo_estado_habilitacion = st.toggle("📢 Habilitar el portal para que los vecinos ingresen sus lecturas del mes", value=estado_actual_habilitacion)
         
