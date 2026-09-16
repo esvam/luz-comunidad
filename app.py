@@ -155,8 +155,20 @@ if modo == "🏠 Portal del Vecino (Ingresar Lectura)":
         st.warning("⏳ El periodo actual **aún no ha sido habilitado** por la administración. Por favor espere a que se habiliten los registros.")
     else:
         st.success("🟢 El periodo de registro de lecturas se encuentra **Habilitado**.")
+        
         lista_usuarios = [k for k, v in datos_actuales["medidores"].items() if v["tipo"] > 0 or k == "AGUA"]
-        vecino_seleccionado = st.selectbox("👤 Seleccione su Medidor / Nombre:", lista_usuarios)
+        
+        # DETECTAR SI LA URL TIENE UN VECINO ESPECÍFICO (Ej: tu-web.streamlit.app/?vecino=MARCO)
+        query_params = st.query_params
+        vecino_url = query_params.get("vecino", None)
+        
+        if vecino_url and vecino_url in lista_usuarios:
+            # Si el enlace tiene un vecino válido, lo seleccionamos automáticamente y mostramos su nombre directo
+            vecino_seleccionado = vecino_url
+            st.info(f"👤 Medidor asignado para este enlace: **{vecino_seleccionado}**")
+        else:
+            # Si entra al enlace general, usa el selector normal
+            vecino_seleccionado = st.selectbox("👤 Seleccione su Medidor / Nombre:", lista_usuarios)
         
         if vecino_seleccionado:
             info_actual = datos_actuales["medidores"][vecino_seleccionado]
