@@ -2,17 +2,21 @@ import os
 import json
 import pandas as pd
 import streamlit as st
-from reportlab.lib.pagesizes import letter
-from reportlab.lib import colors
-from reportlab.platypus import SimpleDocTemplate, Paragraph, Spacer, Table, TableStyle
-from reportlab.lib.styles import getSampleStyleSheet, ParagraphStyle
+import google.generativeai as genai
+from PIL import Image
 
 DB_FILE = "luz_config_actual.json"
 
 # ==========================================
-# CONFIGURACIÓN DE SEGURIDAD DEL ADMINISTRADOR
+# CONFIGURACIÓN DE IA (GEMINI) Y ADMIN
 # ==========================================
 ADMIN_PASSWORD = "admin123_luz"
+
+# Configura tu API Key de Gemini (puedes guardarla en st.secrets de Streamlit Cloud)
+# st.secrets["GEMINI_API_KEY"] o ingresarla mediante variable de entorno
+GEMINI_API_KEY = st.secrets.get("GEMINI_API_KEY", "TU_API_KEY_AQUI")
+if GEMINI_API_KEY != "TU_API_KEY_AQUI":
+    genai.configure(api_key=GEMINI_API_KEY)
 
 def cargar_datos_disco():
     if os.path.exists(DB_FILE):
@@ -33,10 +37,10 @@ def cargar_datos_disco():
             "LILIANA": {"tipo": 2, "anterior": 9129.8, "actual": 0.0, "lectura_guardada": False, "mant_com": 0.0},
             "HELGA": {"tipo": 1, "anterior": 1404.4, "actual": 0.0, "lectura_guardada": False, "mant_com": 100.0},
             "BRAN": {"tipo": 0, "anterior": 6810.7, "actual": 6810.7, "lectura_guardada": False, "mant_com": 0.0},
-            "SIU": {"tipo": 1, "anterior": 0.0, "actual": 0.0, "lectura_guardada": False, "mant_com": 0.0},
-            "EZE": {"tipo": 1, "anterior": 3414.6, "actual": 0.0, "lectura_guardada": False, "mant_com": 0.0},
-            "QUINTA": {"tipo": 1, "anterior": 1916.79, "actual": 0.0, "lectura_guardada": False, "mant_com": 0.0},
-            "SONIA": {"tipo": 1, "anterior": 6859.2, "actual": 0.0, "lectura_guardada": False, "mant_com": 0.0}
+            "SIU": {"tipo": 1, "anterior": 0.0, "actual": 18.57, "lectura_guardada": False, "mant_com": 0.0},
+            "EZE": {"tipo": 1, "anterior": 3414.6, "actual": 3543.5, "lectura_guardada": False, "mant_com": 0.0},
+            "QUINTA": {"tipo": 1, "anterior": 1916.79, "actual": 1936.03, "lectura_guardada": False, "mant_com": 0.0},
+            "SONIA": {"tipo": 1, "anterior": 6859.2, "actual": 6889.4, "lectura_guardada": False, "mant_com": 0.0}
         }
     }
 
@@ -44,7 +48,7 @@ def guardar_datos_disco(data):
     with open(DB_FILE, "w", encoding="utf-8") as f:
         json.dump(data, f, indent=4, ensure_ascii=False)
 
-st.set_page_config(page_title="Sistema de Luz - Comunidad", layout="wide")
+st.set_page_config(page_title="Sistema de Luz - Comunidad con IA", layout="wide")
 
 if "datos_app" not in st.session_state:
     st.session_state.datos_app = cargar_datos_disco()
@@ -137,140 +141,131 @@ def calcular_resultados_comunidad(state_data):
         })
     return resultados
 
+# Función de IA para extraer número del medidor con Gemini
+def extraer_lectura_con_ia(imagen_pil):
+    try:
+        model = genai.GenerativeModel('gemini-1.5-flash')
+        prompt = "Analiza esta foto de un medidor eléctrico y extrae únicamente el número que marca el contador (incluyendo decimales si los hubiera). Responde solo con el número en formato decimal (ejemplo: 3543.50), sin texto adicional."
+        response = model.generate_content([prompt, imagen_pil])
+        texto_limpio = response.text.strip().replace(",", ".")
+        # Filtrar para asegurar que sea un float válido
+        import re
+        match = re.search(r'\d+(\.\d+)?', texto_limpio)
+        if match:
+            return float(match.group())
+        return None
+    except Exception as e:
+        return None
+
 # ==========================================
-# BARRA LATERAL (PRIMERO SE DEFINE EL MENÚ)
+# BARRA LATERAL
 # ==========================================
 st.sidebar.title("📌 Menú de Navegación")
-modo = st.sidebar.radio("Seleccione la sección:", ["🏠 Portal del Vecino (Ingresar Lectura)", "🔐 Panel de Administración"])
+modo = st.sidebar.radio("Seleccione la sección:", ["🏠 Portal del Vecino con IA", "🔐 Panel de Administración"])
 
 
 # ==========================================
-# MODO 1: PORTAL DEL VECINO
+# MODO 1: PORTAL DEL VECINO (CON FOTO E IA)
 # ==========================================
-if modo == "🏠 Portal del Vecino (Ingresar Lectura)":
-    st.title("💡 Portal de Registro de Consumo - Vecinos")
+if modo == "🏠 Portal del Vecino con IA":
+    st.title("🤖 Portal de Lectura Inteligente - Vecinos")
     st.markdown(f"**Periodo Actual:** `{datos_actuales.get('periodo', 'MES ACTUAL')}`")
     
     if not datos_actuales.get("periodo_habilitado", False):
         st.warning("⏳ El periodo actual **aún no ha sido habilitado** por la administración. Por favor espere a que se habiliten los registros.")
     else:
-        st.success("🟢 El periodo de registro de lecturas se encuentra **Habilitado**.")
+        st.success("🟢 El periodo de registro se encuentra **Habilitado**. Toma una foto de tu medidor o ingresa tu número.")
         
         lista_usuarios = [k for k, v in datos_actuales["medidores"].items() if v["tipo"] > 0 or k == "AGUA"]
         
-        # DETECTAR SI LA URL TIENE UN VECINO ESPECÍFICO (Ej: tu-web.streamlit.app/?vecino=MARCO)
         query_params = st.query_params
         vecino_url = query_params.get("vecino", None)
         
         if vecino_url and vecino_url in lista_usuarios:
-            # Si el enlace tiene un vecino válido, lo seleccionamos automáticamente y mostramos su nombre directo
             vecino_seleccionado = vecino_url
-            st.info(f"👤 Medidor asignado para este enlace: **{vecino_seleccionado}**")
+            st.info(f"👤 Medidor asignado: **{vecino_seleccionado}**")
         else:
-            # Si entra al enlace general, usa el selector normal
             vecino_seleccionado = st.selectbox("👤 Seleccione su Medidor / Nombre:", lista_usuarios)
         
         if vecino_seleccionado:
             info_actual = datos_actuales["medidores"][vecino_seleccionado]
             lectura_anterior = float(info_actual['anterior'])
             
+            st.markdown("---")
+            st.markdown("### 📸 Opción 1: Subir o Tomar Foto del Medidor (IA)")
+            foto_medidor = st.file_uploader("Sube una foto clara de tu medidor eléctrico:", type=["jpg", "jpeg", "png"])
+            
+            lectura_detectada = None
+            if foto_medidor is not None:
+                imagen = Image.open(foto_medidor)
+                st.image(imagen, caption="Foto de tu medidor", width=300)
+                
+                if GEMINI_API_KEY == "TU_API_KEY_AQUI":
+                    st.error("⚠️ La API Key de Gemini no está configurada en el sistema. Por favor ingresa el valor manualmente abajo.")
+                else:
+                    if st.button("✨ Extraer número con Inteligencia Artificial"):
+                        with st.spinner("Leyendo medidor con IA..."):
+                            lectura_ia = extraer_lectura_con_ia(imagen)
+                            if lectura_ia is not None:
+                                st.success(f"¡IA detectó la lectura: **{lectura_ia}**!")
+                                lectura_detectada = lectura_ia
+                            else:
+                                st.error("No se pudo leer claramente el número. Por favor ingrésalo manualmente.")
+
+            st.markdown("### 🔢 Ingreso y Confirmación de Lectura")
             with st.form("form_lectura_vecino"):
+                # Si la IA detectó un número, lo ponemos por defecto para que el vecino solo confirme
+                valor_inicial = lectura_detectada if lectura_detectada is not None else None
+                
                 nueva_lectura = st.number_input(
-                    "🔢 Ingrese su Lectura Actual (kWh):", 
-                    value=None, 
+                    "Confirme o ingrese su Lectura Actual (kWh):", 
+                    value=valor_inicial, 
                     format="%.2f", 
                     placeholder="Ej: 3543.50"
                 )
-                btn_guardar_lectura = st.form_submit_button("💾 Guardar mi Medición")
+                btn_guardar_lectura = st.form_submit_button("✅ Confirmar y Ver mi Total a Pagar")
                 
                 if btn_guardar_lectura:
                     if nueva_lectura is None:
-                        datos_actuales["medidores"][vecino_seleccionado]["lectura_guardada"] = False
-                        guardar_datos_disco(datos_actuales)
-                        st.error("❌ Por favor ingrese un número válido en su lectura actual.")
+                        st.error("❌ Por favor ingrese o confirme un número válido.")
                         st.stop()
                     elif nueva_lectura <= lectura_anterior:
                         datos_actuales["medidores"][vecino_seleccionado]["lectura_guardada"] = False
                         guardar_datos_disco(datos_actuales)
-                        st.error(f"❌ Error de validación: Su lectura actual debe ser estrictamente mayor a su lectura anterior ({lectura_anterior} kWh). No puede descargar recibo con un valor menor o igual.")
+                        st.error(f"❌ Error de validación: Su lectura actual debe ser mayor a su lectura anterior ({lectura_anterior} kWh).")
                         st.stop()
                     else:
                         registrar_estado()
                         datos_actuales["medidores"][vecino_seleccionado]["actual"] = float(nueva_lectura)
                         datos_actuales["medidores"][vecino_seleccionado]["lectura_guardada"] = True
                         guardar_datos_disco(datos_actuales)
-                        st.success("¡Lectura registrada correctamente! Ya puede descargar su recibo abajo.")
-            
+                        st.success("¡Lectura confirmada y registrada con éxito!")
+
+            # Si ya guardó y validó, mostrar DIRECTAMENTE el TOTAL A PAGAR EN PANTALLA (Sin PDFs molestos)
             lectura_actual_guardada = float(info_actual["actual"])
             if info_actual.get("lectura_guardada", False) and lectura_actual_guardada > lectura_anterior:
-                st.success("✅ Medición válida registrada para este periodo. Su recibo está listo para descarga privada.")
-                
                 resultados_calculados = calcular_resultados_comunidad(datos_actuales)
                 datos_vecino = next((item for item in resultados_calculados if item["Medidor"] == vecino_seleccionado), None)
                 
                 if datos_vecino:
-                    def generar_pdf_privado(periodo, persona, datos_completos):
-                        pdf_filename = f"Recibo_{persona}_{periodo.replace(' ', '_')}.pdf"
-                        doc = SimpleDocTemplate(pdf_filename, pagesize=letter, rightMargin=40, leftMargin=40, topMargin=40, bottomMargin=40)
-                        story = []
-                        styles = getSampleStyleSheet()
-                        
-                        title_style = ParagraphStyle('TitleStyle', parent=styles['Heading1'], fontSize=15, textColor=colors.HexColor('#1f4e79'), alignment=1, spaceAfter=10)
-                        subtitle_style = ParagraphStyle('SubTitleStyle', parent=styles['Normal'], fontSize=10, textColor=colors.HexColor('#555555'), alignment=1, spaceAfter=15)
-                        
-                        story.append(Paragraph(f"RECIBO DE CONSUMO DE LUZ", title_style))
-                        story.append(Paragraph(f"<b>Periodo:</b> {periodo} &nbsp;&nbsp;|&nbsp;&nbsp; <b>Medidor / Propietario:</b> {persona}", subtitle_style))
-                        story.append(Spacer(1, 5))
-                        
-                        elementos_tabla = [["Concepto", "Monto / Detalle"]]
-                        for k, v in datos_completos.items():
-                            if isinstance(v, (int, float)) and v == 0 and k not in ["Lectura Anterior", "Lectura Actual"]:
-                                continue
-                            elementos_tabla.append([str(k), f"{v:,.2f}" if isinstance(v, (int, float)) else str(v)])
-                            
-                        t = Table(elementos_tabla, colWidths=[240, 180])
-                        t.setStyle(TableStyle([
-                            ('BACKGROUND', (0,0), (1,0), colors.HexColor('#1f4e79')),
-                            ('TEXTCOLOR', (0,0), (1,0), colors.white),
-                            ('ALIGN', (0,0), (-1,-1), 'LEFT'),
-                            ('FONTNAME', (0,0), (-1,0), 'Helvetica-Bold'),
-                            ('BOTTOMPADDING', (0,0), (-1,0), 6),
-                            ('BACKGROUND', (0,1), (-1,-1), colors.HexColor('#f9f9f9')),
-                            ('GRID', (0,0), (-1,-1), 0.5, colors.HexColor('#dddddd')),
-                            ('ROWBACKGROUNDS', (0,1), (-1,-1), [colors.white, colors.HexColor('#fdfdfd')]),
-                            ('FONTNAME', (0,1), (-1,-1), 'Helvetica'),
-                            ('FONTSIZE', (0,0), (-1,-1), 9),
-                            ('BOTTOMPADDING', (0,1), (-1,-1), 5),
-                            ('TOPPADDING', (0,1), (-1,-1), 5),
-                        ]))
-                        story.append(t)
-                        story.append(Spacer(1, 15))
-                        story.append(Paragraph("<i>* Recibo personal generado automáticamente. Gracias por su puntualidad.</i>", ParagraphStyle('Body', parent=styles['Normal'], fontSize=9)))
-                        doc.build(story)
-                        return pdf_filename
-
-                    col_dl1, col_dl2 = st.columns(2)
-                    pdf_path = generar_pdf_privado(datos_actuales.get("periodo", "MES"), vecino_seleccionado, datos_vecino["Detalle_Completo"])
-                    with open(pdf_path, "rb") as pdf_file:
-                        with col_dl1:
-                            st.download_button(
-                                label="📥 Descargar Recibo en PDF",
-                                data=pdf_file,
-                                file_name=pdf_path,
-                                mime="application/pdf"
-                            )
+                    st.markdown("---")
+                    st.markdown("### 💰 Su Resumen de Pago del Mes")
                     
-                    df_csv_vecino = pd.DataFrame([{"Concepto": k, "Monto ($)": v} for k, v in datos_vecino["Detalle_Completo"].items()])
-                    csv_data = df_csv_vecino.to_csv(index=False).encode('utf-8')
-                    with col_dl2:
-                        st.download_button(
-                            label="📊 Descargar Recibo en CSV",
-                            data=csv_data,
-                            file_name=f"Recibo_{vecino_seleccionado}.csv",
-                            mime="text/csv"
-                        )
+                    # Mostrar métrica grande y clara con el total
+                    st.metric(label=f"Total a Pagar ({datos_actuales.get('periodo', 'MES')})", value=f"$ {datos_vecino['TOTAL']:,.2f}")
+                    
+                    with st.expander("Ver desglose detallado de su consumo"):
+                        df_detalle_vecino = pd.DataFrame([
+                            {"Concepto": k, "Monto ($)": v} 
+                            for k, v in datos_vecino["Detalle_Completo"].items() 
+                            if not (isinstance(v, (int, float)) and v == 0 and k not in ["Lectura Anterior", "Lectura Actual"])
+                        ])
+                        st.dataframe(df_detalle_vecino, use_container_width=True, hide_index=True)
+                    
+                    st.success("🎉 ¡Todo listo! Ya quedó registrado su consumo para este periodo. Gracias por su puntualidad.")
             else:
-                st.warning("⚠️ Para poder descargar su recibo, debe ingresar obligatoriamente una lectura actual válida que sea mayor a la anterior.")
+                st.warning("⚠️ Confirme su lectura actual usando la foto o ingresándola manualmente para visualizar su total a pagar.")
+
 
 # ==========================================
 # MODO 2: PANEL DE ADMINISTRACIÓN
@@ -324,7 +319,7 @@ else:
                     vals["lectura_guardada"] = False
                 st.session_state.datos_app["periodo_habilitado"] = False
                 guardar_datos_disco(st.session_state.datos_app)
-                st.success("¡Nuevo ciclo iniciado! Las lecturas actuales pasaron a ser las anteriores correctamente y se bloqueó el acceso hasta cargar los nuevos cargos fijos.")
+                st.success("¡Nuevo ciclo iniciado! Se pasaron las lecturas actuales a anteriores y se bloqueó el acceso.")
                 st.rerun()
 
         with col_ctrl4:
@@ -358,35 +353,6 @@ else:
         datos_actuales["periodo"] = periodo_nombre
         datos_actuales["cargos_fijos_globales"] = cargos_actualizados
 
-        with st.expander("➕ Agregar Nuevo Usuario / Medidor a la Comunidad"):
-            with st.form("form_nuevo_usuario_admin"):
-                col_u1, col_u2, col_u3, col_u4, col_u5 = st.columns(5)
-                with col_u1:
-                    nuevo_nombre = st.text_input("Nombre / Medidor").strip().upper()
-                with col_u2:
-                    nuevo_tipo = st.number_input("Tipo (0=Inactivo, 1, 2...)", min_value=0, value=1, step=1)
-                with col_u3:
-                    nuevo_anterior = st.number_input("Lectura Anterior", value=0.0, format="%.2f")
-                with col_u4:
-                    nuevo_actual = st.number_input("Lectura Actual", value=0.0, format="%.2f")
-                with col_u5:
-                    nuevo_mant_com = st.number_input("Maint. Comunal", value=0.0, format="%.2f")
-                    
-                if st.form_submit_button("Registrar Usuario"):
-                    if not nuevo_nombre:
-                        st.error("Ingresa un nombre válido.")
-                    elif nuevo_nombre in datos_actuales["medidores"]:
-                        st.error("El usuario ya existe.")
-                    else:
-                        registrar_estado()
-                        datos_actuales["medidores"][nuevo_nombre] = {
-                            "tipo": int(nuevo_tipo), "anterior": float(nuevo_anterior),
-                            "actual": float(nuevo_actual), "lectura_guardada": False, "mant_com": float(nuevo_mant_com)
-                        }
-                        guardar_datos_disco(datos_actuales)
-                        st.success("¡Usuario registrado!")
-                        st.rerun()
-
         st.markdown("### 📊 Control General de Lecturas (Admin)")
         df_medidores = pd.DataFrame.from_dict(datos_actuales["medidores"], orient='index')
         df_medidores.index.name = "MEDIDOR"
@@ -414,7 +380,7 @@ else:
 
         if st.button("💾 Guardar y Aplicar Cambios Globales"):
             guardar_datos_disco(st.session_state.datos_app)
-            st.success("¡Configuración y cargos fijos actualizados con éxito!")
+            st.success("¡Configuración actualizada con éxito!")
 
         resultados_globales = calcular_resultados_comunidad(st.session_state.datos_app)
         df_resumen = pd.DataFrame(resultados_globales)
